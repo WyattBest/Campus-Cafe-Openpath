@@ -62,9 +62,12 @@ def op_get_users(group):
     return results
 
 
-def op_search_user(email, external_id):
+def op_search_user(email=None, external_id=None):
     """Get a specific user from Openpath by email and/or external ID."""
     results = {}
+
+    if not email and not external_id:
+        raise AttributeError("Must specify either email or external_id.")
 
     if email:
         params = {"preFilter": f"identity.email:(={email})"}
@@ -92,20 +95,89 @@ def op_search_user(email, external_id):
 
 
 def op_get_group_id(group):
-    pass
+    """Get a group ID from Openpath by name."""
+    params = {"preFilter": f"name:(={group})"}
+
+    url = f"{conf.op.url}/orgs/{conf.op.org_id}/groups"
+    headers = {"Authorization": f"Bearer {jwt}"}
+    r = requests.get(url=url, headers=headers, params=params)
+    r.raise_for_status()
+
+    data = r.json()["data"]
+    if len(data) > 1:
+        raise Exception(f"Multiple groups found for {group}")
+    else:
+        group_id = data[0]["id"]
+
+    return group_id
 
 
 def op_add_user_to_group(user, group):
-    """Add a user to a group in Openpath."""
-    groups = [g["id"] for g in user["groups"]]
-    new_group = op_get_group_id(group)
-    groups.extend([new_group])
+    """Add a user to a group in Openpath. Expects full User object."""
 
-    userid = user["identity"]["id"]
+    new_group = op_get_group_id(group)
+    payload = {"add": [new_group]}
+    userid = user["id"]
+
     url = f"{conf.op.url}/orgs/{conf.op.org_id}/users/{userid}/groupIds"
     headers = {"Authorization": f"Bearer {jwt}"}
-    r = requests.put(url=url, headers=headers, json=groups)
+    r = requests.patch(url=url, headers=headers, json=payload)
     r.raise_for_status()
+
+
+def op_create_user(email, first, last, external_id=None, group=None):
+    """Create a user in Openpath and optionally add to group. Return new user ID."""
+
+    payload = {
+        "identity": {
+            "email": conf.op.email,
+            "firstName": first,
+            "lastName": last,
+        },
+    }
+
+    if external_id:
+        payload["externalId"] = external_id
+
+    url = f"{conf.op.url}/orgs/{conf.op.org_id}/users"
+    headers = {"Authorization": f"Bearer {jwt}"}
+    r = requests.post(url=url, headers=headers, json=payload)
+    r.raise_for_status()
+
+    new_userid = r.json()["data"]["id"]
+    if group:
+        op_add_user_to_group(new_userid, group)
+
+    return new_userid
+
+
+def op_update_user(user, email=None, first=None, last=None, external_id=None):
+    """Update a user in Openpath. Expects full User object."""
+
+    userid = user["id"]
+    payload = {}
+
+    if email:
+        payload["identity"] = {"email": email}
+
+    if first:
+        payload["identity"] = {"firstName": first}
+
+    if last:
+        payload["identity"] = {"lastName": last}
+
+    if external_id:
+        payload["externalId"] = external_id
+
+    # Make sure there's something to update
+    if len(payload) == 0:
+        raise AttributeError("Must specify at least one attribute to update.")
+
+    url = f"{conf.op.url}/orgs/{conf.op.org_id}/users/{userid}"
+    headers = {"Authorization": f"Bearer {jwt}"}
+    r = requests.patch(url=url, headers=headers, json=payload)
+    r.raise_for_status()
+
 
 with open("settings.json") as config_file:
     config_json = json.load(config_file)
@@ -151,9 +223,16 @@ for k, v in conf.groups.items():
     # Add users already in Openpath to group
     verbose_print("Adding existing users to Openpath group...")
     for m in found:
-        pass
+        op_add_user_to_group(found[m], k)
+        verbose_print(f"Added {m} to {k}")
 
     # Create new users in Openpath
     verbose_print("Creating new users in Openpath...")
     for m in missing:
-        pass
+        id_number = cc_membership[m]["ID_NUMBER"]
+        first = cc_membership[m]["FIRST_NAME"]
+        last = cc_membership[m]["LAST_NAME"]
+        new_userid = op_create_user(m, first, last, id_number, k)
+        verbose_print(
+            f"New user {m} created with Openpath ID {new_userid} and added to {k}."
+        )
