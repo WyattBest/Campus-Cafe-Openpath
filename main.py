@@ -279,3 +279,5 @@ for k, v in conf.groups.items():
         verbose_print(f"Updating external_id for {m}")
         external_id = cc_membership[m]["ID_NUMBER"]
         op_update_user(op_membership[m], external_id=external_id)
+
+verbose_print("Done!")

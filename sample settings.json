@@ -1,0 +1,19 @@
+{
+    "verbose": true,
+    "Openpath": {
+        "url": "https://api.openpath.com",
+        "org_id": 1234,
+        "email": "api_user@yourdomain.com",
+        "password": "a strong password"
+    },
+    "CampusCafe": {
+        "username": "domain\\user",
+        "password": "a strong password"
+    },
+    "groups": {
+        "Students": {
+            "id": "12345",
+            "source": "https://reports.campuscafesoftware.com/ReportServer?<location string>&rs:Format=csv"
+        }
+    }
+}
