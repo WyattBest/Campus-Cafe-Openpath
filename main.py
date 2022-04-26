@@ -1,4 +1,3 @@
-from distutils.command.config import config
 import requests, json, csv, io
 from config import Config
 
@@ -16,7 +15,7 @@ def verbose_print(x):
 
 
 def op_auth(url, email, password):
-    # Authenticate and get a JWT
+    # Authenticate and get a JSON Web Token
     headers = {"Accept": "application/json", "Content-Type": "application/json"}
     auth_data = {"email": email, "password": password}
 
@@ -94,29 +93,28 @@ def op_search_user(email=None, external_id=None):
     return results
 
 
-def op_get_group_id(group):
-    """Get a group ID from Openpath by name."""
-    params = {"preFilter": f"name:(={group})"}
+# def op_get_group_id(group):
+#     """Get a group ID from Openpath by name."""
+#     params = {"preFilter": f"name:(={group})"}
 
-    url = f"{conf.op.url}/orgs/{conf.op.org_id}/groups"
-    headers = {"Authorization": f"Bearer {jwt}"}
-    r = requests.get(url=url, headers=headers, params=params)
-    r.raise_for_status()
+#     url = f"{conf.op.url}/orgs/{conf.op.org_id}/groups"
+#     headers = {"Authorization": f"Bearer {jwt}"}
+#     r = requests.get(url=url, headers=headers, params=params)
+#     r.raise_for_status()
 
-    data = r.json()["data"]
-    if len(data) > 1:
-        raise Exception(f"Multiple groups found for {group}")
-    else:
-        group_id = data[0]["id"]
+#     data = r.json()["data"]
+#     if len(data) > 1:
+#         raise Exception(f"Multiple groups found for {group}")
+#     else:
+#         group_id = data[0]["id"]
 
-    return group_id
+#     return group_id
 
 
-def op_add_user_to_group(user, group):
+def op_add_user_to_group(user, group_id):
     """Add a user to a group in Openpath. Expects full User object."""
 
-    new_group = op_get_group_id(group)
-    payload = {"add": [new_group]}
+    payload = {"add": [group_id]}
     userid = user["id"]
 
     url = f"{conf.op.url}/orgs/{conf.op.org_id}/users/{userid}/groupIds"
@@ -125,11 +123,10 @@ def op_add_user_to_group(user, group):
     r.raise_for_status()
 
 
-def op_remove_user_from_group(user, group):
+def op_remove_user_from_group(user, group_id):
     """Remove a user from a group in Openpath. Expects full User object."""
 
-    remove_group = op_get_group_id(group)
-    payload = {"remove": [remove_group]}
+    payload = {"remove": [group_id]}
     userid = user["id"]
 
     url = f"{conf.op.url}/orgs/{conf.op.org_id}/users/{userid}/groupIds"
@@ -138,7 +135,7 @@ def op_remove_user_from_group(user, group):
     r.raise_for_status()
 
 
-def op_create_user(email, first, last, external_id=None, group=None):
+def op_create_user(email, first, last, external_id=None, group_id=None):
     """Create a user in Openpath and optionally add to group. Return new user ID."""
 
     payload = {
@@ -158,8 +155,8 @@ def op_create_user(email, first, last, external_id=None, group=None):
     r.raise_for_status()
 
     new_userid = r.json()["data"]["id"]
-    if group:
-        op_add_user_to_group(new_userid, group)
+    if group_id:
+        op_add_user_to_group(new_userid, group_id)
 
     return new_userid
 
@@ -253,9 +250,9 @@ for k, v in conf.groups.items():
         if m != found[m]["identity"]["email"]:
             verbose_print(f"Updating email address for {m}")
             op_update_user(found[m], email=cc_membership[m]["USERNAME"])
-        elif len([g for g in m["groups"] if g["name"] == k]) == 0:
+        elif len([g for g in m["groups"] if g["id"] == v["id"]]) == 0:
             verbose_print(f"Adding {m} to group {k}")
-            op_add_user_to_group(found[m], k)
+            op_add_user_to_group(found[m], v["id"])
         elif m["Status"] != "A":
             verbose_print(f"Updating status for {m} to Active")
             op_set_user_status(found[m], "A")
@@ -278,7 +275,7 @@ for k, v in conf.groups.items():
     # Remove extra users from Openpath group
     for m in extra:
         verbose_print(f"Removing {m} from group {k}")
-        op_remove_user_from_group(m, k)
+        op_remove_user_from_group(op_membership[m], v["id"])
 
     # Find users in Openpath missing external_id and update
     verbose_print("Refreshing Openpath membership...")
