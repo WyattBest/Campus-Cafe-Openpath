@@ -144,7 +144,7 @@ def op_create_user(email, first, last, external_id=None, group_id=None):
 
     payload = {
         "identity": {
-            "email": conf.op.email,
+            "email": email,
             "firstName": first,
             "lastName": last,
         },
@@ -158,9 +158,10 @@ def op_create_user(email, first, last, external_id=None, group_id=None):
     r = requests.post(url=url, headers=headers, json=payload)
     r.raise_for_status()
 
-    new_userid = r.json()["data"]["id"]
+    new_user = r.json()["data"]
+    new_userid = new_user["id"]
     if group_id:
-        op_add_user_to_group(new_userid, group_id)
+        op_add_user_to_group(new_user, group_id)
 
     return new_userid
 
@@ -226,8 +227,11 @@ for k, v in conf.groups.items():
     verbose_print("Campus Cafe membership: " + str(len(cc_membership)))
 
     # Get list of Campus Cafe members with holds
-    cc_holds = cc_get_report(v["holds"])
-    cc_holds = {m["USERNAME"].lower(): m for m in cc_holds}
+    holds_enabled = False
+    if "holds" in v and v["holds"] is not None:
+        holds_enabled = True
+        cc_holds = cc_get_report(v["holds"])
+        cc_holds = {m["USERNAME"].lower(): m for m in cc_holds}
 
     # Get list of members from Openpath that correspond to this group
     verbose_print("Getting members from Openpath...")
@@ -236,7 +240,8 @@ for k, v in conf.groups.items():
 
     # Compare lists; exlude members with holds
     missing = set(cc_membership).difference(set(op_membership))
-    missing = missing.difference(set(cc_holds))
+    if holds_enabled:
+        missing = missing.difference(set(cc_holds))
     verbose_print("Missing from Openpath group: " + str(len(missing)))
 
     extra = set(op_membership).difference(set(cc_membership))
@@ -244,19 +249,19 @@ for k, v in conf.groups.items():
 
     # Look up missing users in Openpath
     found = {}
+    verbose_print("Looking up missing users in Openpath...")
     for m in missing:
-        verbose_print("Looking up missing users in Openpath...")
         id_number = cc_membership[m]["ID_NUMBER"]
         op_user = op_search_user(m, id_number)
+        verbose_print(f"Looking up {m} ({id_number})...found {len(op_user)} matches.")
         if len(op_user) > 1:
             raise Exception(f"Multiple Openpath users found for {m} ({id_number})")
-        verbose_print(f"Looking up {m} ({id_number})...found {len(op_user)} matches.")
-        op_user = op_user[0]
-        found.update({m: op_user})
+        elif len(op_user) == 1:
+            found.update({m: op_user[0]})
 
     # Add found users to group, update status, or update email address in Openpath
     for m in found:
-        if m != found[m]["identity"]["email"]:
+        if str(m).lower() != found[m]["identity"]["email"].lower():
             verbose_print(f"Updating email address for {m}")
             op_update_user(found[m], email=cc_membership[m]["USERNAME"])
         elif len([g for g in found[m]["groups"] if g["id"] == v["id"]]) == 0:
@@ -306,13 +311,15 @@ for k, v in conf.groups.items():
         op_update_user(op_membership[m], external_id=external_id)
 
     # Suspend users in Openpath present in Campus Cafe holds list
-    verbose_print(
-        f"{len(cc_holds)} users on hold...checking that all are suspended in Openpath..."
-    )
-    for m in cc_holds:
-        if m in op_membership:
-            verbose_print(f"Suspending {m}")
-            op_set_user_status(op_membership[m], "S")
+    if holds_enabled:
+        verbose_print(
+            f"{len(cc_holds)} users on hold...checking that all are suspended in Openpath..."
+        )
+        for m in cc_holds:
+            if m in op_membership:
+                verbose_print(f"Suspending {m}")
+                op_set_user_status(op_membership[m], "S")
 
+# Todo: Delete any Openpath users not in any groups (to preserve license seats)
 
 verbose_print("Done!")
