@@ -48,8 +48,8 @@ def op_transform_userlist(list):
 
 
 def op_get_users(group):
-    """Get list of users from Openpath with optional group filter."""
-    params = {"preFilter": f"group.name:(={group})"}
+    """Get list of active users from Openpath with optional group filter."""
+    params = {"preFilter": f"group.name:(={group}) status:(=A)"}
 
     url = f"{conf.op.url}/orgs/{conf.op.org_id}/users"
     headers = {"Authorization": f"Bearer {jwt}"}
@@ -117,6 +117,19 @@ def op_add_user_to_group(user, group):
 
     new_group = op_get_group_id(group)
     payload = {"add": [new_group]}
+    userid = user["id"]
+
+    url = f"{conf.op.url}/orgs/{conf.op.org_id}/users/{userid}/groupIds"
+    headers = {"Authorization": f"Bearer {jwt}"}
+    r = requests.patch(url=url, headers=headers, json=payload)
+    r.raise_for_status()
+
+
+def op_remove_user_from_group(user, group):
+    """Remove a user from a group in Openpath. Expects full User object."""
+
+    remove_group = op_get_group_id(group)
+    payload = {"remove": [remove_group]}
     userid = user["id"]
 
     url = f"{conf.op.url}/orgs/{conf.op.org_id}/users/{userid}/groupIds"
@@ -218,10 +231,10 @@ for k, v in conf.groups.items():
 
     # Compare lists
     missing = set(cc_membership).difference(set(op_membership))
-    verbose_print("Missing from Openpath: " + str(len(missing)))
+    verbose_print("Missing from Openpath group: " + str(len(missing)))
 
     extra = set(op_membership).difference(set(cc_membership))
-    verbose_print("Extra in Openpath (probably inactive): " + str(len(extra)))
+    verbose_print("Extra in Openpath group: " + str(len(extra)))
 
     # Look up missing users in Openpath
     found = {}
@@ -251,7 +264,7 @@ for k, v in conf.groups.items():
 
         missing.remove(m)
 
-    # Create new users in Openpath
+    # Create new users in Openpath group
     for m in missing:
         verbose_print("Creating new users in Openpath...")
         id_number = cc_membership[m]["ID_NUMBER"]
@@ -261,6 +274,11 @@ for k, v in conf.groups.items():
         verbose_print(
             f"New user {m} created with Openpath ID {new_userid} and added to {k}."
         )
+
+    # Remove extra users from Openpath group
+    for m in extra:
+        verbose_print(f"Removing {m} from group {k}")
+        op_remove_user_from_group(m, k)
 
     # Find users in Openpath missing external_id and update
     verbose_print("Refreshing Openpath membership...")
