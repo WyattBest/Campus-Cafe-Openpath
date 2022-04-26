@@ -64,7 +64,7 @@ def op_get_users(group):
 
 def op_search_user(email=None, external_id=None):
     """Get a specific user from Openpath by email and/or external ID."""
-    results = {}
+    results = []
 
     if not email and not external_id:
         raise AttributeError("Must specify either email or external_id.")
@@ -78,7 +78,7 @@ def op_search_user(email=None, external_id=None):
         r.raise_for_status()
 
         data = r.json()["data"]
-        results.update(op_transform_userlist(data))
+        results.extend(data)
 
     if external_id:
         params = {"preFilter": f"externalId:(={external_id})"}
@@ -89,7 +89,7 @@ def op_search_user(email=None, external_id=None):
         r.raise_for_status()
 
         data = r.json()["data"]
-        results.update(op_transform_userlist(data))
+        results.extend(data)
 
     return results
 
@@ -179,6 +179,23 @@ def op_update_user(user, email=None, first=None, last=None, external_id=None):
     r.raise_for_status()
 
 
+def op_set_user_status(user, status):
+    """Set user status in Openpath. Expects full User object."""
+
+    if status not in ("A", "I", "S"):
+        raise AttributeError(
+            "Status must be A (active), I (deleted), or S (suspended)."
+        )
+
+    userid = user["id"]
+    payload = {"status": status}
+
+    url = f"{conf.op.url}/orgs/{conf.op.org_id}/users/{userid}/status"
+    headers = {"Authorization": f"Bearer {jwt}"}
+    r = requests.patch(url=url, headers=headers, json=payload)
+    r.raise_for_status()
+
+
 with open("settings.json") as config_file:
     config_json = json.load(config_file)
     conf = Config(config_json)
@@ -193,42 +210,50 @@ for k, v in conf.groups.items():
     cc_membership = cc_get_report(v["source"])
     cc_membership = {m["USERNAME"].lower(): m for m in cc_membership}
     verbose_print("Campus Cafe membership: " + str(len(cc_membership)))
-    # verbose_print(cc_membership)
 
     # Get list of members from Openpath that correspond to this group
     verbose_print("Getting members from Openpath...")
     op_membership = op_get_users(k)
     verbose_print("Openpath membership: " + str(len(op_membership)))
-    # verbose_print(op_membership)
 
     # Compare lists
     missing = set(cc_membership).difference(set(op_membership))
     verbose_print("Missing from Openpath: " + str(len(missing)))
-    # verbose_print(missing)
 
     extra = set(op_membership).difference(set(cc_membership))
-    verbose_print("Extra in Openpath: " + str(len(extra)))
-    # verbose_print(extra)
+    verbose_print("Extra in Openpath (probably inactive): " + str(len(extra)))
 
     # Look up missing users in Openpath
-    verbose_print("Looking up missing users in Openpath...")
     found = {}
-
     for m in missing:
+        verbose_print("Looking up missing users in Openpath...")
         id_number = cc_membership[m]["ID_NUMBER"]
         op_user = op_search_user(m, id_number)
+        if len(op_user) > 1:
+            raise Exception(f"Multiple Openpath users found for {m} ({id_number})")
         verbose_print(f"Looking up {m} ({id_number})...found {len(op_user)} matches.")
-        found.update(op_user)
+        op_user = op_user[0]
+        found.update({m: op_user})
 
-    # Add users already in Openpath to group
-    verbose_print("Adding existing users to Openpath group...")
+    # Add found users to group, update status, or update email address in Openpath
     for m in found:
-        op_add_user_to_group(found[m], k)
-        verbose_print(f"Added {m} to {k}")
+        if m != found[m]["identity"]["email"]:
+            verbose_print(f"Updating email address for {m}")
+            op_update_user(found[m], email=cc_membership[m]["USERNAME"])
+        elif len([g for g in m["groups"] if g["name"] == k]) == 0:
+            verbose_print(f"Adding {m} to group {k}")
+            op_add_user_to_group(found[m], k)
+        elif m["Status"] != "A":
+            verbose_print(f"Updating status for {m} to Active")
+            op_set_user_status(found[m], "A")
+        else:
+            verbose_print(f"Unsure what to do with {m}. Skipping user.")
+
+        missing.remove(m)
 
     # Create new users in Openpath
-    verbose_print("Creating new users in Openpath...")
     for m in missing:
+        verbose_print("Creating new users in Openpath...")
         id_number = cc_membership[m]["ID_NUMBER"]
         first = cc_membership[m]["FIRST_NAME"]
         last = cc_membership[m]["LAST_NAME"]
@@ -236,3 +261,21 @@ for k, v in conf.groups.items():
         verbose_print(
             f"New user {m} created with Openpath ID {new_userid} and added to {k}."
         )
+
+    # Find users in Openpath missing external_id and update
+    verbose_print("Refreshing Openpath membership...")
+    op_membership = op_get_users(k)
+    missing_external_id = [
+        kk
+        for kk, vv in op_membership.items()
+        if vv["externalId"] is None and kk in cc_membership and vv["status"] == "A"
+    ]
+    if len(missing_external_id) > 0:
+        verbose_print(
+            f"Updating {str(len(missing_external_id))} Openpath users missing external_id..."
+        )
+
+    for m in missing_external_id:
+        verbose_print(f"Updating external_id for {m}")
+        external_id = cc_membership[m]["ID_NUMBER"]
+        op_update_user(op_membership[m], external_id=external_id)
