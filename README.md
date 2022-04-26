@@ -1,7 +1,5 @@
-# Campus-Cafe-Openpath
- Integrate Campus Cafe SIS with Openpath access control system.
-
-A one-way integration to Openpath from a Campus Cafe report.
+# Campus Cafe > Openpath
+A one-way integration from the Campus Cafe SIS to the Openpath access control system.
 
 Capabilities:
 + Create users
