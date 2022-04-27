@@ -13,6 +13,11 @@
     "groups": {
         "Students": {
             "id": "12345",
+            "source": "https://reports.campuscafesoftware.com/ReportServer?<location string>&rs:Format=csv",
+            "holds": "https://reports.campuscafesoftware.com/ReportServer?<location string>&rs:Format=csv"
+        },
+        "Faculty": {
+            "id": "12345",
             "source": "https://reports.campuscafesoftware.com/ReportServer?<location string>&rs:Format=csv"
         }
     }

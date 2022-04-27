@@ -19,3 +19,4 @@ class Config:
         def __init__(self, config):
             self.username = config["username"]
             self.password = config["password"]
+            self.url = config["url"]

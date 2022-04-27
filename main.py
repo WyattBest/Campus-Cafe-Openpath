@@ -1,4 +1,4 @@
-import requests, json, csv, io
+import requests, json, csv, io, base64
 from config import Config
 
 
@@ -163,6 +163,29 @@ def op_create_user(email, first, last, external_id=None, group_id=None):
     if group_id:
         op_add_user_to_group(new_user, group_id)
 
+    # Upload user profile picture to Openpath
+    if external_id:
+        photo_url = f"{conf.cc.url}/cafeweb/images/Headshots/{external_id}.jpg"
+        r = requests.get(url=photo_url)
+
+        if r.status_code == 200:
+            photo_data = r.content
+
+            payload = {
+                "isAvatar": True,
+                "picture": {
+                    "base64": "data:image/jpg;base64,"
+                    + base64.b64encode(photo_data).decode()
+                },
+            }
+
+            url = f"{conf.op.url}/orgs/{conf.op.org_id}/users/{new_userid}/userPictures"
+            headers = {
+                "Authorization": f"{jwt}",
+            }
+            r = requests.post(url=url, headers=headers, json=payload)
+            r.raise_for_status()
+
     return new_userid
 
 
@@ -282,7 +305,6 @@ for k, v in conf.groups.items():
         first = cc_membership[m]["FIRST_NAME"]
         last = cc_membership[m]["LAST_NAME"]
         new_userid = op_create_user(m, first, last, id_number, k)
-        # Todo: upload user's picture
         verbose_print(
             f"New user {m} created with Openpath ID {new_userid} and added to {k}."
         )
