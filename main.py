@@ -287,12 +287,12 @@ for k, v in conf.groups.items():
         if str(m).lower() != found[m]["identity"]["email"].lower():
             verbose_print(f"Updating email address for {m}")
             op_update_user(found[m], email=cc_membership[m]["USERNAME"])
+        elif found[m]["status"] != "A":
+            verbose_print(f"Updating status for {m} to Active")
+            op_set_user_status(found[m], "A")
         elif len([g for g in found[m]["groups"] if g["id"] == v["id"]]) == 0:
             verbose_print(f"Adding {m} to group {k}")
             op_add_user_to_group(found[m], v["id"])
-        elif m["Status"] != "A":
-            verbose_print(f"Updating status for {m} to Active")
-            op_set_user_status(found[m], "A")
         else:
             verbose_print(f"Unsure what to do with {m}. Skipping user.")
 
