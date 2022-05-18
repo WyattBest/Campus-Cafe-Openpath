@@ -186,6 +186,14 @@ def op_create_user(email, first, last, external_id=None, group_id=None):
             r = requests.post(url=url, headers=headers, json=payload)
             r.raise_for_status()
 
+    # Send user an email to setup the mobile app
+    payload = {"email": email}
+    headers = {"Authorization": f"Bearer {jwt}"}
+
+    url = f"{conf.op.url}/auth/setupMobile"
+    r = requests.post(url=url, headers=headers, json=payload)
+    r.raise_for_status()
+
     return new_userid
 
 
