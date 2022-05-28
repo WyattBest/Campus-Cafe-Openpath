@@ -97,26 +97,27 @@ def op_search_user(email=None, external_id=None):
     return results
 
 
-# def op_get_group_id(group):
-#     """Get a group ID from Openpath by name."""
-#     params = {"preFilter": f"name:(={group})"}
+def op_get_group_id(group):
+    """Get a group ID from Openpath by name."""
+    params = {"preFilter": f"name:(={group})"}
 
-#     url = f"{conf.op.url}/orgs/{conf.op.org_id}/groups"
-#     headers = {"Authorization": f"Bearer {jwt}"}
-#     r = requests.get(url=url, headers=headers, params=params)
-#     r.raise_for_status()
+    url = f"{conf.op.url}/orgs/{conf.op.org_id}/groups"
+    headers = {"Authorization": f"Bearer {jwt}"}
+    r = requests.get(url=url, headers=headers, params=params)
+    r.raise_for_status()
 
-#     data = r.json()["data"]
-#     if len(data) > 1:
-#         raise Exception(f"Multiple groups found for {group}")
-#     else:
-#         group_id = data[0]["id"]
+    data = r.json()["data"]
+    if len(data) > 1:
+        raise Exception(f"Multiple groups found for {group}")
+    else:
+        group_id = data[0]["id"]
 
-#     return group_id
+    return group_id
 
 
 def op_add_user_to_group(user, group_id):
     """Add a user to a group in Openpath. Expects full User object."""
+    # https://openpath.readme.io/reference/updateusergroupids
 
     payload = {"add": [group_id]}
     userid = user["id"]
@@ -170,6 +171,22 @@ def op_create_user(email, first, last, external_id=None, group_id=None):
 
         if r.status_code == 200:
             photo_data = r.content
+
+            # # Crop photo to square
+            # img = Image.open(io.BytesIO(photo_data))
+            # width, height = img.size
+            # if width > height:
+            #     left = (width - height) / 2
+            #     top = 0
+            #     right = height + left
+            #     bottom = height
+            # else:
+            #     left = 0
+            #     top = (height - width) / 2
+            #     right = width
+            #     bottom = width + top
+
+            # img = img.crop((left, top, right, bottom))
 
             payload = {
                 "isAvatar": True,
@@ -250,6 +267,7 @@ jwt = op_auth(conf.op.url, conf.op.email, conf.op.password)
 
 for k, v in conf.groups.items():
     verbose_print(f"Synchronizing group {k}")
+    group_id = op_get_group_id(k)
 
     # Get list of members from Campus Cafe
     verbose_print(f"Getting report from: {v['source']}...")
@@ -274,6 +292,9 @@ for k, v in conf.groups.items():
     if holds_enabled:
         missing = missing.difference(set(cc_holds))
     verbose_print("Missing from Openpath group: " + str(len(missing)))
+
+    # Debug: Remove all but one user from Missing
+    # missing = [m for m in missing if m == 'email@domain.com']
 
     extra = set(op_membership).difference(set(cc_membership))
     verbose_print("Extra in Openpath group: " + str(len(extra)))
@@ -312,7 +333,7 @@ for k, v in conf.groups.items():
         id_number = cc_membership[m]["ID_NUMBER"]
         first = cc_membership[m]["FIRST_NAME"]
         last = cc_membership[m]["LAST_NAME"]
-        new_userid = op_create_user(m, first, last, id_number, k)
+        new_userid = op_create_user(m, first, last, id_number, group_id)
         verbose_print(
             f"New user {m} created with Openpath ID {new_userid} and added to {k}."
         )
