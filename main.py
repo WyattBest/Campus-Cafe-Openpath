@@ -47,6 +47,7 @@ def op_transform_userlist(list):
 
 
 def op_get_users(group):
+
     """Get list of active users from Openpath with optional group filter."""
     params = {"preFilter": f"group.name:(={group}) status:(=A)"}
 
@@ -89,10 +90,12 @@ def op_search_user(email=None, external_id=None):
 
         data = r.json()["data"]
 
-        # Make sure we didn't get a duplicate
-        if len(data) > 0:
+        if len(data) > 0 and len(results) > 0:
+            # Make sure we didn't get a duplicate
             if data[0]["id"] != results[0]["id"]:
                 results.extend(data)
+        elif len(data) > 0:
+            results.extend(data)
 
     return results
 
@@ -137,6 +140,29 @@ def op_remove_user_from_group(user, group_id):
     url = f"{conf.op.url}/orgs/{conf.op.org_id}/users/{userid}/groupIds"
     headers = {"Authorization": f"Bearer {jwt}"}
     r = requests.patch(url=url, headers=headers, json=payload)
+    r.raise_for_status()
+
+
+def op_create_mobile_cred(user_id):
+    """Create a users' mobile credential in Openpath."""
+    # https://openpath.readme.io/reference/createcredential
+
+    payload = {"mobile": {"name": "Mobile"}, "credentialTypeId": 1}
+
+    url = f"{conf.op.url}/orgs/{conf.op.org_id}/users/{user_id}/credentials"
+    headers = {"Authorization": f"Bearer {jwt}"}
+    r = requests.post(url=url, headers=headers, json=payload)
+    r.raise_for_status()
+
+
+def op_send_magic_link(email):
+    """Send user an email to setup the mobile app."""
+    # https://openpath.readme.io/reference/setupmobilecredential
+    payload = {"email": email}
+    headers = {"Authorization": f"Bearer {jwt}"}
+
+    url = f"{conf.op.url}/auth/setupMobile"
+    r = requests.post(url=url, headers=headers, json=payload)
     r.raise_for_status()
 
 
@@ -203,13 +229,8 @@ def op_create_user(email, first, last, external_id=None, group_id=None):
             r = requests.post(url=url, headers=headers, json=payload)
             r.raise_for_status()
 
-    # Send user an email to setup the mobile app
-    payload = {"email": email}
-    headers = {"Authorization": f"Bearer {jwt}"}
-
-    url = f"{conf.op.url}/auth/setupMobile"
-    r = requests.post(url=url, headers=headers, json=payload)
-    r.raise_for_status()
+    op_create_mobile_cred(new_userid)
+    op_send_magic_link(email)
 
     return new_userid
 
@@ -293,9 +314,6 @@ for k, v in conf.groups.items():
         missing = missing.difference(set(cc_holds))
     verbose_print("Missing from Openpath group: " + str(len(missing)))
 
-    # Debug: Remove all but one user from Missing
-    # missing = [m for m in missing if m == 'email@domain.com']
-
     extra = set(op_membership).difference(set(cc_membership))
     verbose_print("Extra in Openpath group: " + str(len(extra)))
 
@@ -310,6 +328,9 @@ for k, v in conf.groups.items():
             raise Exception(f"Multiple Openpath users found for {m} ({id_number})")
         elif len(op_user) == 1:
             found.update({m: op_user[0]})
+            if op_user[0]["identity"]["email"] in extra:
+                verbose_print(f"Removing {m} from extra list.")
+                extra.remove(op_user[0]["identity"]["email"])
 
     # Add found users to group, update status, or update email address in Openpath
     for m in found:
@@ -319,12 +340,11 @@ for k, v in conf.groups.items():
         elif found[m]["status"] != "A":
             verbose_print(f"Updating status for {m} to Active")
             op_set_user_status(found[m], "A")
-        elif len([g for g in found[m]["groups"] if g["id"] == v["id"]]) == 0:
-            verbose_print(f"Adding {m} to group {k}")
-            op_add_user_to_group(found[m], v["id"])
         else:
-            verbose_print(f"Unsure what to do with {m}. Skipping user.")
+            verbose_print(f"{m} is already Active with correct email address.")
 
+        verbose_print(f"Adding {m} to group {k}")
+        op_add_user_to_group(found[m], v["id"])
         missing.remove(m)
 
     # Create new users in Openpath group
@@ -351,6 +371,7 @@ for k, v in conf.groups.items():
         for kk, vv in op_membership.items()
         if vv["externalId"] is None and kk in cc_membership and vv["status"] == "A"
     ]
+    verbose_print(f"Users missing external_id: {len(missing_external_id)}")
     if len(missing_external_id) > 0:
         verbose_print(
             f"Updating {str(len(missing_external_id))} Openpath users missing external_id..."
